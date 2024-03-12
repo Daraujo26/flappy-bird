@@ -7,16 +7,19 @@
             <img id="game-ground" src="@/assets/flappy-bird-assets/sprites/base.png" class="ground">
             <img id="game-ground-2" src="@/assets/flappy-bird-assets/sprites/base.png" class="ground">
         </div>
+        <GameOver v-if="gameOver" @restart-game="resetGame"/>
     </div>
 </template>
 
 <script>
+import GameOver from './pop_ups/GameOver.vue'
+
 import downFlap from '@/assets/flappy-bird-assets/sprites/yellowbird-downflap.png'
 import midFlap from '@/assets/flappy-bird-assets/sprites/yellowbird-midflap.png'
 import upFlap from '@/assets/flappy-bird-assets/sprites/yellowbird-upflap.png'
 
 export default {
-    components: {  },
+    components: { GameOver },
     data() {
         return {
             currentBirdImg: midFlap,
@@ -111,8 +114,18 @@ export default {
         },
         endGame() {
             this.gameActive = false
+            this.gameOver = true
             clearInterval(this.gravityIntervalId);
-        }
+        },
+        resetGame() {
+            this.gameActive = false;
+            this.gameOver = false;
+            this.birdYPosition = 50; 
+            this.birdRotation = 0; 
+            
+            clearInterval(this.gravityIntervalId);
+            clearTimeout(this.rotationTimeout);
+        },
     }
 }
 </script>
