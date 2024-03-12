@@ -1,7 +1,7 @@
 <template>
     <div id="game-container">
         <img id="game-background" src="@/assets/flappy-bird-assets/sprites/background-day.png">
-        <img id="flappy-bird" :src="currentBirdImg" :style="{ top: birdYPosition + '%', transform: `rotate(${birdRotation}deg)` }">
+        <img id="flappy-bird" :src="currentBirdImg" :style="{ top: birdYPosition + '%', transform: `rotate(${birdRotation}deg)`}">
         <img id="get-ready-img" src="@/assets/flappy-bird-assets/sprites/message.png">
         <div id="ground-container" ref="groundContainer">
             <img id="game-ground" src="@/assets/flappy-bird-assets/sprites/base.png" class="ground">
@@ -46,52 +46,53 @@ export default {
     },
     methods: {
         animateBird() {
-            let index = 0
-            setInterval(() => {
-                this.currentBirdImg = this.flappyBirdImgs[index]
-                index = (index + 1) % this.flappyBirdImgs.length
-            }, 250)
+            let index = 0;
+            const flap = () => {
+                if (!this.gameActive) return; // Stop the animation if the game is not active
+                this.currentBirdImg = this.flappyBirdImgs[index];
+                index = (index + 1) % this.flappyBirdImgs.length;
+                setTimeout(flap, 250);
+            };
+            flap();
         },
         scrollGround() {
-            const speed = 2.0; // speed of the ground
-            const frame = () => {
-                // this prevents a reference error when compiling
-                if (this.$refs.groundContainer) {
-                    this.groundOffset -= speed;
-                    let groundWidth = this.$refs.groundContainer.offsetWidth / 2; // the container holds 2 full widths of the ground image
-                    if (this.groundOffset <= -groundWidth) {
-                        this.groundOffset = 0;
-                    }
-                    this.$refs.groundContainer.style.transform = `translateX(${this.groundOffset}px)`;
-                    requestAnimationFrame(frame);
-                } else {
-                    console.log('groundContainer reference not found');
+            const speed = 2.0;
+            const animate = () => {
+                if (!this.gameActive) return; // Stop the animation if the game is not active
+                this.groundOffset -= speed;
+                let groundWidth = this.$refs.groundContainer.offsetWidth / 2;
+                if (this.groundOffset <= -groundWidth) {
+                    this.groundOffset = 0;
                 }
+                this.$refs.groundContainer.style.transform = `translateX(${this.groundOffset}px)`;
+                requestAnimationFrame(animate);
             };
-            requestAnimationFrame(frame);
+            requestAnimationFrame(animate);
         },
         updateBirdPosition(event) {
             if (event.code === 'Space') {
                 if (!this.gameActive) {
-                    this.gameActive = true
+                    this.gameActive = true;
                     this.gravityIntervalId = setInterval(this.simulateGravity, 100);
+                    // Start the animations as the game becomes active
+                    this.animateBird();
+                    this.scrollGround();
                 }
 
                 this.birdYPosition -= 17; // jump
                 this.birdRotation = -25; // jump rotate animation
 
                 this.startRotation = false;
-                clearTimeout(this.rotationTimeout)
+                clearTimeout(this.rotationTimeout);
                 this.rotationTimeout = setTimeout(() => {
-                    this.startRotation = true
+                    this.startRotation = true;
                 }, 500);
-            
 
-                //
-                // bird cant jump out of the background
                 if (this.birdYPosition < 0) {
-                    this.birdYPosition = 0
+                    this.birdYPosition = 0;
                 }
+
+                this.waitingStart = false
             }
         },
         simulateGravity() {
@@ -120,11 +121,16 @@ export default {
         resetGame() {
             this.gameActive = false;
             this.gameOver = false;
+            this.waitingStart = true
             this.birdYPosition = 50; 
             this.birdRotation = 0; 
+            this.groundOffset = 0
             
             clearInterval(this.gravityIntervalId);
             clearTimeout(this.rotationTimeout);
+
+            this.animateBird()
+            this.scrollGround()
         },
     }
 }
@@ -180,5 +186,14 @@ body {
     height: 17vh;
     display: flex;
     z-index: 3;
+}
+
+#waiting-start-message {
+    position: absolute;
+    left: 50%;
+    top: 40%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    width: 45vh;
 }
 </style>
