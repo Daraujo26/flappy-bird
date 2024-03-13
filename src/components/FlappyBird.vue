@@ -1,11 +1,36 @@
 <template>
-    <div id="game-container">
+    <div id="game-container" ref="gameContainer">
         <img id="game-background" src="@/assets/flappy-bird-assets/sprites/background-day.png">
         <img id="flappy-bird" :src="currentBirdImg" :style="{ top: birdYPosition + '%', transform: `rotate(${birdRotation}deg)`}">
         <img id="get-ready-img" src="@/assets/flappy-bird-assets/sprites/message.png">
         <div id="ground-container" ref="groundContainer">
             <img id="game-ground" src="@/assets/flappy-bird-assets/sprites/base.png" class="ground">
+            <div id="first-pipe-1" class="pipe-container" style="left: 10%; visibility: hidden;">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe bottom-pipe">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe top-pipe">
+            </div>
+            <div id="first-pipe-2" class="pipe-container" style="left: 25%; visibility: hidden;">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe bottom-pipe">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe top-pipe">
+            </div>
+            <div class="pipe-container" style="left: 40%;">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe bottom-pipe">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe top-pipe">
+            </div>
+            <div class="pipe-container" style="left: 55%;">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe bottom-pipe">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe top-pipe">
+            </div>
+            <div class="pipe-container" style="left: 70%;">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe bottom-pipe">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe top-pipe">
+            </div>
+            <div class="pipe-container" style="left: 85%;">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe bottom-pipe">
+                <img src="@/assets/flappy-bird-assets/sprites/pipe-green.png" class="pipe top-pipe">
+            </div>
             <img id="game-ground-2" src="@/assets/flappy-bird-assets/sprites/base.png" class="ground">
+            <img id="game-ground-3" src="@/assets/flappy-bird-assets/sprites/base.png" class="ground">
         </div>
         <GameOver v-if="gameOver" @restart-game="resetGame"/>
     </div>
@@ -32,6 +57,11 @@ export default {
             rotationTimeout: null,
             gameActive: false,
             gameOver: false,
+            firstScrollComplete: false,
+
+            pipes: [], // Array to hold the pipes' positions
+            pipeSpawnIntervalId: null,
+            pipeMoveSpeed: 2.0,
         }
     },
     mounted() {
@@ -48,7 +78,7 @@ export default {
         animateBird() {
             let index = 0;
             const flap = () => {
-                if (!this.gameActive) return; // Stop the animation if the game is not active
+                if (!this.gameActive) return; 
                 this.currentBirdImg = this.flappyBirdImgs[index];
                 index = (index + 1) % this.flappyBirdImgs.length;
                 setTimeout(flap, 250);
@@ -58,12 +88,22 @@ export default {
         scrollGround() {
             const speed = 2.0;
             const animate = () => {
-                if (!this.gameActive) return; // Stop the animation if the game is not active
+                if (!this.gameActive) return; 
                 this.groundOffset -= speed;
-                let groundWidth = this.$refs.groundContainer.offsetWidth / 2;
-                if (this.groundOffset <= -groundWidth) {
+
+                let totalGroundWidth = this.$refs.groundContainer.scrollWidth;
+                let viewableWidth = this.$refs.gameContainer.clientWidth;
+
+                if (Math.abs(this.groundOffset) >= totalGroundWidth - viewableWidth) {
                     this.groundOffset = 0;
+                    // Check if it's the first scroll complete
+                    if (!this.firstScrollComplete) {
+                        this.firstScrollComplete = true;
+                        // Call method to add pipes to the first ground image
+                        this.addPipesToFirstGround();
+                    }
                 }
+
                 this.$refs.groundContainer.style.transform = `translateX(${this.groundOffset}px)`;
                 requestAnimationFrame(animate);
             };
@@ -74,9 +114,11 @@ export default {
                 if (!this.gameActive) {
                     this.gameActive = true;
                     this.gravityIntervalId = setInterval(this.simulateGravity, 100);
+
                     // Start the animations as the game becomes active
                     this.animateBird();
                     this.scrollGround();
+                    this.startPipesAnimation();
                 }
 
                 this.birdYPosition -= 17; // jump
@@ -105,7 +147,6 @@ export default {
                     this.birdRotation = Math.min(this.birdRotation, 90);
                 }
 
-                // Prevent the bird from falling below the ground level
                 if (this.birdYPosition >= 80) { 
                     this.birdYPosition = 80;
                     this.birdRotation = 0;
@@ -117,6 +158,7 @@ export default {
             this.gameActive = false
             this.gameOver = true
             clearInterval(this.gravityIntervalId);
+            clearInterval(this.pipeSpawnIntervalId);
         },
         resetGame() {
             this.gameActive = false;
@@ -129,9 +171,46 @@ export default {
             clearInterval(this.gravityIntervalId);
             clearTimeout(this.rotationTimeout);
 
+            clearInterval(this.pipeSpawnIntervalId);
+            this.pipes = [];
+
+            this.$refs.groundContainer.style.transform = `translateX(0px)`;
+
             this.animateBird()
             this.scrollGround()
         },
+        spawnPipe() {
+            const initialLeftPosition = this.$refs.gameContainer.clientWidth; 
+
+            const newPipe = {
+                left: initialLeftPosition, 
+                bottom: 20, 
+            };
+            this.pipes.push(newPipe);
+        },
+        movePipes() {
+            this.pipes.forEach(pipe => {
+                pipe.left -= this.pipeMoveSpeed;
+            });
+            this.pipes = this.pipes.filter(pipe => pipe.left + this.$refs.groundContainer.scrollWidth > 0);
+        },
+        startPipesAnimation() {
+            if (this.pipeSpawnIntervalId) clearInterval(this.pipeSpawnIntervalId);
+            this.pipeSpawnIntervalId = setInterval(() => {
+                this.spawnPipe();
+            }, 1000); 
+
+            const animatePipes = () => {
+                if (!this.gameActive) return;
+                this.movePipes();
+                requestAnimationFrame(animatePipes);
+            };
+            requestAnimationFrame(animatePipes);
+        },
+        addPipesToFirstGround() {
+            document.getElementById('first-pipe-1').style.visibility = "visible"
+            document.getElementById('first-pipe-2').style.visibility = "visible"
+        }
     }
 }
 </script>
@@ -176,13 +255,14 @@ body {
 
 .ground {
     width: 50%;
-    height: 100%; 
+    height: 100%;
+    z-index: 3; 
 }
 
 #ground-container {
     position: absolute;
     bottom: 0;
-    width: calc(200% - 6px);
+    width: calc(300% - 6px);
     height: 17vh;
     display: flex;
     z-index: 3;
@@ -196,4 +276,35 @@ body {
     z-index: 2;
     width: 45vh;
 }
+
+.pipe-container {
+    position: absolute;
+    z-index: 2;
+}
+
+.bottom-pipe, .top-pipe {
+    position: absolute;
+    width: 8vh; 
+    height: 45vh; 
+    overflow: hidden; 
+}
+
+.bottom-pipe {
+    bottom: 0;
+}
+
+.top-pipe {
+    bottom: 50vh;
+    transform: rotate(180deg);
+}
+
+.pipe img {
+    display: block;
+    height: auto; 
+    width: 100%;
+    max-height: 100%;
+    z-index: 2;
+    object-fit: cover;
+}
+
 </style>
