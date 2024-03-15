@@ -1,7 +1,7 @@
 <template>
     <div id="game-container" ref="gameContainer">
         <img id="game-background" src="@/assets/flappy-bird-assets/sprites/background-day.png">
-        <img id="flappy-bird" :src="currentBirdImg"
+        <img id="flappy-bird" ref="flappyBird" :src="currentBirdImg"
             :style="{ top: birdYPosition + '%', transform: `rotate(${birdRotation}deg)` }">
         <img id="get-ready-img" src="@/assets/flappy-bird-assets/sprites/message.png">
         <div id="ground-container" ref="groundContainer">
@@ -33,6 +33,11 @@ import midFlap from '@/assets/flappy-bird-assets/sprites/yellowbird-midflap.png'
 import upFlap from '@/assets/flappy-bird-assets/sprites/yellowbird-upflap.png';
 import groundImage from '@/assets/flappy-bird-assets/sprites/base.png';
 
+// sounds
+import wingSoundPath from '@/assets/flappy-bird-assets/audio/wing.ogg';
+import pointSoundPath from '@/assets/flappy-bird-assets/audio/point.ogg';
+import hitSoundPath from '@/assets/flappy-bird-assets/audio/hit.ogg';
+
 export default {
     components: { GameOver },
     data() {
@@ -55,15 +60,30 @@ export default {
             nextPipeId: 0,
             pipeMoveInterval: null,
             score: 0,
+            preventRotation: false,
+            allowAnimations: false,
+            isJumping: false,
+            wingSound: new Audio(wingSoundPath),
+            pointSound: new Audio(pointSoundPath),
+            hitSound: new Audio(hitSoundPath),
         };
     },
     mounted() {
         window.addEventListener('keydown', this.handleJump);
+        this.allowAnimations = true;
+        this.animateBird();
+        this.moveGround();
     },
     beforeUnmount() {
         this.endGame();
         window.removeEventListener('keydown', this.handleJump);
     },
+    birdYPosition() {
+        this.$nextTick(() => {
+            this.updateHitboxPosition();
+        });
+    },
+
     methods: {
         startGame() {
             clearInterval(this.gravityIntervalId);
@@ -72,6 +92,7 @@ export default {
 
             this.gameActive = true;
             this.gameOver = false;
+            this.allowAnimations = false;
             this.gravityIntervalId = this.simulateGravity();
             this.animateBird();
             this.moveGround();
@@ -84,7 +105,7 @@ export default {
         animateBird() {
             let index = 0;
             this.birdFlapInterval = setInterval(() => {
-                if (!this.gameActive) return;
+                if (!this.allowAnimations && !this.gameActive) return;
                 this.currentBirdImg = this.flappyBirdImgs[index];
                 index = (index + 1) % this.flappyBirdImgs.length;
             }, 250);
@@ -92,13 +113,18 @@ export default {
         handleJump(event) {
             if (event.code === 'Space') {
                 if (this.awaitingStart) {
+                    this.isJumping = true;
                     this.gameActive = true;
                     this.awaitingStart = false;
+                    this.allowAnimations = this.gameOver;
                     this.gravityIntervalId = this.simulateGravity();
                     this.animateBird();
                     this.moveGround();
                     this.movePipes();
+
+                    setTimeout(() => this.isJumping = false, 500);
                 } else if (!this.gameOver) {
+                    this.wingSound.play();
                     this.updateBirdPosition();
                 }
             }
@@ -106,26 +132,49 @@ export default {
         simulateGravity() {
             return setInterval(() => {
                 if (!this.gameActive || this.gameOver) return;
-                this.birdYPosition += 3.25;
+                this.birdYPosition += 4; // gravity strength
+
+                // tilt of the bird while falling
+                if (!this.preventRotation) {
+                    this.birdRotation += 25;
+                    if (this.birdRotation > 90) this.birdRotation = 90;
+                }
+
                 if (this.birdYPosition >= 80) {
                     this.birdYPosition = 80;
                     this.endGame();
                 }
+                this.checkCollision();
             }, 100);
         },
         updateBirdPosition() {
+            this.updateHitboxPosition()
             this.birdYPosition -= 17;
             if (this.birdYPosition < 0) this.birdYPosition = 0;
 
-            this.birdRotation = -25;
+            this.birdRotation = -20; // bird tilts 20 degrees on jump
+            this.preventRotation = true;
             clearTimeout(this.rotationTimeout);
             this.rotationTimeout = setTimeout(() => {
+                this.preventRotation = false;
                 this.birdRotation = 0;
-            }, 100);
+            }, 500);
 
             setTimeout(() => {
                 this.checkCollision();
-            }, 50);
+            }, 10);
+        },
+        updateHitboxPosition() {
+            if (this.hitbox && this.$refs.flappyBird) {
+                const birdElement = this.$refs.flappyBird;
+                const birdRect = birdElement.getBoundingClientRect();
+
+                // initial hitbox alignment
+                this.hitbox.style.width = `${birdRect.width}px`;
+                this.hitbox.style.height = `${birdRect.height}px`;
+                this.hitbox.style.left = `${birdRect.left}px`;
+                this.hitbox.style.top = `${birdRect.top}px`;
+            }
         },
         calculateBirdPosition() {
             const gameWidth = this.$refs.gameContainer.clientWidth;
@@ -144,87 +193,57 @@ export default {
             };
         },
 
-        calculatePipeRects(pipe) {
-            const gameHeight = this.$refs.gameContainer.clientHeight;
-            const pipeWidth = 52;
-
-            const topPipeBottom = pipe.topHeight;
-            const bottomPipeTop = gameHeight - pipe.bottomHeight;
-
-            return {
-                top: {
-                    left: pipe.left,
-                    top: 0,
-                    right: pipe.left + pipeWidth,
-                    bottom: topPipeBottom
-                },
-                bottom: {
-                    left: pipe.left,
-                    top: bottomPipeTop,
-                    right: pipe.left + pipeWidth,
-                    bottom: gameHeight
-                }
-            };
-        },
-
         checkCollision() {
-            const birdBounds = this.calculateBirdBounds();
+            const birdRect = this.$refs.flappyBird.getBoundingClientRect();
+            const gameRect = this.$refs.gameContainer.getBoundingClientRect();
+
+            // Translate bird's rect to game container coordinates
+            const birdTop = birdRect.top - gameRect.top;
+            const birdBottom = birdTop + birdRect.height;
+            const birdLeft = birdRect.left - gameRect.left;
+            const birdRight = birdLeft + birdRect.width;
+
             this.pipes.forEach(pipe => {
-                const pipeBounds = this.calculatePipeBounds(pipe);
-                if (this.isOverlapping(birdBounds, pipeBounds.top) || this.isOverlapping(birdBounds, pipeBounds.bottom)) {
-                    this.endGame();
+                const pipeX = pipe.left;
+                const pipeRight = pipeX + 52; // Pipe width
+                const topPipeBottom = pipe.topHeight;
+                const bottomPipeTop = gameRect.height - pipe.bottomHeight;
+
+                // Enhance the precision for top pipe collision
+                if (birdRight > pipeX && birdLeft < pipeRight) {
+                    // For top pipe, check if bird's bottom is higher than the pipe's bottom boundary
+                    if (birdTop < topPipeBottom) {
+                        this.triggerCollision();
+                        return;
+                    }
+                    // For bottom pipe, check if bird's top is lower than the pipe's top boundary
+                    if (birdBottom > bottomPipeTop) {
+                        this.triggerCollision();
+                        return;
+                    }
                 }
             });
+
+            // Check for collision with the ground
+            if (birdBottom >= gameRect.height) {
+                this.triggerCollision();
+            }
         },
-
-        calculateBirdBounds() {
-            const birdLeft = (40 / 100) * this.$refs.gameContainer.clientWidth;
-            const birdTop = (this.birdYPosition / 100) * this.$refs.gameContainer.clientHeight;
-            const birdWidth = (7 / 100) * this.$refs.gameContainer.clientHeight;
-            const birdHeight = birdWidth;
-
-            return {
-                left: birdLeft,
-                top: birdTop,
-                right: birdLeft + birdWidth,
-                bottom: birdTop + birdHeight
-            };
+        triggerCollision() {
+            console.log('Collision Detected');
+            this.hitSound.play();
+            this.endGame();
+            this.gameActive = false;
+            this.gameOver = true;
         },
-
-        calculatePipeBounds(pipe) {
-            const pipeWidth = 52;
-            const gameHeight = this.$refs.gameContainer.clientHeight;
-
-            return {
-                top: {
-                    left: pipe.left,
-                    top: 0,
-                    right: pipe.left + pipeWidth,
-                    bottom: pipe.topHeight,
-                },
-                bottom: {
-                    left: pipe.left,
-                    top: gameHeight - pipe.bottomHeight,
-                    right: pipe.left + pipeWidth,
-                    bottom: gameHeight,
-                }
-            };
-        },
-
-        isOverlapping(rect1, rect2) {
-            return !(rect1.right < rect2.left ||
-                rect1.left > rect2.right ||
-                rect1.bottom < rect2.top ||
-                rect1.top > rect2.bottom);
-        },
-
         moveGround() {
             const groundSpeed = 2; // ground and pipes move at the same speed
             const viewWidth = this.$refs.gameContainer.offsetWidth;
             const totalGroundWidth = this.$refs.groundContainer.scrollWidth;
+            clearInterval(this.groundMoveInterval);
 
             this.groundMoveInterval = setInterval(() => {
-                if (!this.gameActive || this.gameOver) return;
+                if (!this.allowAnimations && !this.gameActive) return;
 
                 this.groundOffset -= groundSpeed; // moves ground to the left
 
@@ -241,7 +260,7 @@ export default {
             let minSpawnDistance = 300; // spacing between the pipes
 
             this.pipeMoveInterval = setInterval(() => {
-                if (!this.gameActive || this.gameOver) return;
+                if (!this.gameActive) return;
 
                 // spawning new pipes based on the last pipe's position.
                 if (this.pipes.length === 0 || (this.pipes[this.pipes.length - 1].left + minSpawnDistance < this.$refs.gameContainer.clientWidth)) {
@@ -253,11 +272,11 @@ export default {
                     pipe.left -= groundSpeed;
 
                     // scoring mechanism
-                    const birdPosition = 40;
-                    if (!pipe.scored && pipe.left < birdPosition) {
+                    const scorePosition = 120;
+                    if (!pipe.scored && pipe.left < scorePosition) {
                         this.score += 1;
                         pipe.scored = true;
-                        console.log(this.score)
+                        this.pointSound.play();
                     }
                 });
 
@@ -266,42 +285,40 @@ export default {
             }, 1000 / 60);
         },
         spawnPipe() {
+            const gapSize = 50; // gap size between the pipes
+            const groundHeightVh = 17; // ground height in vh (viewport height percentage)
 
-            const gapSize = 25;
-            const groundHeightVh = 17;
-            const minTopHeight = 50; // minimum height for top pipes to ensure visibility
-            const minBottomHeight = 80; // minimum height for bottom pipes to prevent hiding
+            // min and max height for the top pipe as percentage of game container height
+            const minHeightPercent = 10;
+            const maxHeightPercent = 70;
 
-            // finds the available space for pipes, adjusting for the vh unit
-            const gameHeightPx = this.$refs.gameContainer.clientHeight; // total height of the game container in pixels
-            const groundHeightPx = (gameHeightPx * groundHeightVh) / 100; // convert vh to pixels for calculation
-            const availableSpaceForPipes = gameHeightPx - groundHeightPx - gapSize;
+            // viewport to pixels
+            const gameHeightPx = this.$refs.gameContainer.clientHeight;
+            const groundHeightPx = (gameHeightPx * groundHeightVh) / 100;
 
-            // randomly determine height to get different gap locations
-            let topPipeHeight = Math.floor(Math.random() * (availableSpaceForPipes - minBottomHeight - minTopHeight)) + minTopHeight;
-            let bottomPipeHeight = availableSpaceForPipes - topPipeHeight;
+            // find the max space for the pipes, subtracting the ground height and gap size
+            const maxPipeSpacePx = gameHeightPx - groundHeightPx - gapSize;
 
-            // height requirements
-            if (bottomPipeHeight < minBottomHeight) {
-                bottomPipeHeight = minBottomHeight;
-                topPipeHeight = availableSpaceForPipes - bottomPipeHeight;
+            // randomly determine the top pipe's height within the allowed range, converting percentage to pixels
+            let topPipeHeightPx = Math.floor(Math.random() * ((maxPipeSpacePx * maxHeightPercent / 100) - (maxPipeSpacePx * minHeightPercent / 100) + 1) + (maxPipeSpacePx * minHeightPercent / 100));
+
+            // this is so the bottom pipe's height does not extend into the ground
+            let bottomPipeHeightPx = maxPipeSpacePx - topPipeHeightPx;
+
+            if (bottomPipeHeightPx > maxPipeSpacePx * maxHeightPercent / 100) {
+                bottomPipeHeightPx = maxPipeSpacePx * maxHeightPercent / 100;
+                topPipeHeightPx = maxPipeSpacePx - bottomPipeHeightPx;
             }
 
-            // check to ensure total pipe configuration does not pass available space
-            if (topPipeHeight + gapSize + bottomPipeHeight > availableSpaceForPipes) {
-                const excessHeight = topPipeHeight + gapSize + bottomPipeHeight - availableSpaceForPipes;
-                topPipeHeight -= excessHeight / 2;
-                bottomPipeHeight -= excessHeight / 2;
-            }
-
-            // push the new pipe configuration, making sure both top and bottom pipes fit well within the game area
             this.pipes.push({
                 id: this.nextPipeId++,
-                left: this.$refs.gameContainer.clientWidth, // starting off screen to the right
-                topHeight: topPipeHeight,
-                bottomHeight: bottomPipeHeight,
+                left: this.$refs.gameContainer.clientWidth,
+                topHeight: topPipeHeightPx,
+                bottomHeight: bottomPipeHeightPx,
+                scored: false
             });
         },
+
         endGame() {
             this.gameActive = false;
             this.gameOver = true;
@@ -326,16 +343,20 @@ export default {
             this.pipes = [];
             this.nextPipeId = 0;
             this.score = 0;
+            this.allowAnimations = true;
 
             // clear intervals
             clearInterval(this.gravityIntervalId);
             clearInterval(this.pipeMoveInterval);
             clearInterval(this.groundMoveInterval);
+            clearInterval(this.birdFlapInterval);
 
             // reset timers
             this.gravityIntervalId = null;
             this.pipeMoveInterval = null;
             this.groundMoveInterval = null;
+
+            this.moveGround();
         },
     },
 };
