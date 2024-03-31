@@ -70,6 +70,7 @@ export default {
     },
     mounted() {
         window.addEventListener('keydown', this.handleJump);
+        this.$refs.gameContainer.addEventListener('touchstart', this.handleJump);
         this.allowAnimations = true;
         this.animateBird();
         this.moveGround();
@@ -77,6 +78,7 @@ export default {
     beforeUnmount() {
         this.endGame();
         window.removeEventListener('keydown', this.handleJump);
+        this.$refs.gameContainer.removeEventListener('touchstart', this.handleJump);
     },
     birdYPosition() {
         this.$nextTick(() => {
@@ -111,7 +113,7 @@ export default {
             }, 250);
         },
         handleJump(event) {
-            if (event.code === 'Space') {
+            if (!event || event.type === 'touchstart' || event.code === 'Space') {
                 if (this.awaitingStart) {
                     this.isJumping = true;
                     this.gameActive = true;
@@ -149,7 +151,7 @@ export default {
         },
         updateBirdPosition() {
             this.updateHitboxPosition()
-            this.birdYPosition -= 17;
+            this.birdYPosition -= 14;
             if (this.birdYPosition < 0) this.birdYPosition = 0;
 
             this.birdRotation = -20; // bird tilts 20 degrees on jump
@@ -285,7 +287,7 @@ export default {
             }, 1000 / 60);
         },
         spawnPipe() {
-            const gapSize = 50; // gap size between the pipes
+            const gapSize = 60; // gap size between the pipes
             const groundHeightVh = 17; // ground height in vh (viewport height percentage)
 
             // min and max height for the top pipe as percentage of game container height
